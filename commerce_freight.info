@@ -1,0 +1,8 @@
+; $Id$
+name = Commerce Freight Rates 
+description = UPS Freight Rates
+package = Commerce
+dependencies[] = commerce
+core = 7.x
+
+

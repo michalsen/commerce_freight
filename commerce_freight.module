@@ -1,0 +1,278 @@
+<?php
+// $Id: 
+
+/**
+ * Implementation of hook_rules_condition_info().
+ */
+function commerce_freight_rules_condition_info() {
+$conditions['commerce_freight_check_order_shipping_rate'] = array(
+    'label' => t('QGB Freight Rate'),
+    'group' => t('Commerce - shipping'),
+    'parameter' => array(
+      'commerce_order' => array('type' => 'commerce_order', 'label' => t('Order')),
+      'freight_list' => array('type' => 'text',
+          'label' => t('Order weight.'),
+          'restriction' => 'input',
+          'default value' => '150',
+      ),
+    ),
+  );
+  return $conditions;
+}
+
+function commerce_freight_check_order_shipping_rate($commerce_order) {
+   return TRUE;
+}
+
+/**
+ * Implements hook_commerce_shipping_method_info().
+ */
+function commerce_freight_commerce_shipping_method_info() {
+ $shipping_methods = array();
+  $shipping_methods['ws_freight_shipping_method'] = array(
+    'title' => t('Freight Shipping Rate'),
+    'description' => t('UPS Freight Rate'),
+  );
+  return $shipping_methods;
+}
+
+/**
+ * Implements hook_commerce_shipping_service_info().
+ */
+function commerce_freight_commerce_shipping_service_info() {
+  $shipping_services = array();
+
+  $shipping_services['freight_shipping_service'] = array(
+    'title' => t('UPS Freight Rate'),
+    'description' => t('UPS Freight Rates'),
+    'display_title' => t('UPS Freight Rate'),
+    'shipping_method' => 'ws_freight_shipping_method',
+    'price_component' => 'shipping',
+    'callbacks' => array(
+      'rate' => 'commerce_freight_service_rate',
+      'details_form' => 'commerce_freight_service_details_form',
+      'details_form_validate' => 'commerce_freight_service_details_form_validate',
+      'details_form_submit' => 'commerce_freight_service_details_form_submit',
+    ),
+  );
+  return $shipping_services;
+}
+
+/**
+ * Shipping service callback: returns a base price array for a shipping service
+ * calculated for the given order.
+ */
+function commerce_freight_service_rate($shipping_service, $order) {
+  
+  $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
+  $profile = $order_wrapper->commerce_customer_shipping->value();
+  $profile_wrapper = entity_metadata_wrapper('commerce_customer_profile', $profile);
+  $address = $profile_wrapper->commerce_customer_address->value();
+/* 
+  dpm('order_wrapper');
+  dpm($order_wrapper);
+  dpm('profile_wrapper');
+  dpm($profile_wrapper);
+  dpm('profile');
+  dpm($profile);
+  dpm('address');
+  dpm($address);
+*/
+  $weight = commerce_physical_order_weight($order, 'lb');
+  $orderweight = $weight['weight'];
+
+  drupal_set_message('Your Order Weight: ' . $orderweight);
+
+// wwwcie. is for testing
+//$url = "https://wwwcie.ups.com/webservices/FreightRate";
+$url = "https://onlinetools.ups.com/webservices/FreightRate";
+
+// Credentials
+// Should this be in the db? Sure...I just needed this thing up.
+$userName = USERNAME;
+$password = PASSWORD;
+$accessLicenseNumber = AccessLicenseNumber;
+
+
+// From Address
+$fromState = Your State;
+$fromPostalCode = Your Zip;
+$fromCountryCode = 'US';
+
+// To Address
+$toState = $address['administrative_area'];
+$toPostalCode = $address['postal_code'];
+$toCountryCode = 'US';
+
+function buildAddress($name, $addressLine, $city, $stateProvinceCode, $postalCode, $countryCode){
+return '
+        <q1:Name>'.$name.'</q1:Name>
+        <q1:Address>
+          <q1:AddressLine>'.$addressLine.'</q1:AddressLine>
+          <q1:City>'.$city.'</q1:City>
+          <q1:StateProvinceCode>'.$stateProvinceCode.'</q1:StateProvinceCode>
+          <q1:PostalCode>'.$postalCode.'</q1:PostalCode>
+          <q1:CountryCode>'.$countryCode.'</q1:CountryCode>
+        </q1:Address>';
+}
+
+
+
+function buildSecurity($uName, $pWord, $licenseNumber){
+return  '
+                <q0:UPSSecurity>
+                        <q0:UsernameToken>
+                                <q0:Username>'.$uName.'</q0:Username>
+                                <q0:Password>'.$pWord.'</q0:Password>
+                        </q0:UsernameToken>
+                        <q0:ServiceAccessToken>
+                                <q0:AccessLicenseNumber>'.$licenseNumber.'</q0:AccessLicenseNumber>
+                        </q0:ServiceAccessToken>
+                </q0:UPSSecurity>';
+}
+
+
+// Create the XML Request
+
+$header = <<<HEAD
+Content-Type: text/xml; charset=utf-8
+SOAPAction: 'http://onlinetools.ups.com/webservices/FreightRateBinding'
+HEAD;
+
+$xmlRequest = '
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:q0="http://www.ups.com/XMLSchema/XOLTWS/UPSS/v1.0" 
+xmlns:q1="http://www.ups.com/XMLSchema/XOLTWS/FreightRate/v1.0"
+xmlns:q2="http://www.ups.com/XMLSchema/XOLTWS/Common/v1.0" 
+xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <soapenv:Header>
+                '.buildSecurity($userName,$password,$accessLicenseNumber).'
+  
+      </soapenv:Header>
+        <soapenv:Body>
+                <q1:FreightRateRequest>
+                        <q2:Request />
+                        <q1:ShipFrom>
+                                '.buildAddress('', '', '', STATE, ZIP, 'US').'
+                        </q1:ShipFrom>
+                        <q1:ShipTo>
+                                '.buildAddress('', '', '', $toState, $toPostalCode, $toCountryCode).'
+                        </q1:ShipTo>
+                        <q1:PaymentInformation>
+                                <q1:Payer>
+                                        '.buildAddress(PAYER, STREET, CITY, STATE, ZIP, 'US').'
+                                </q1:Payer>
+                                <q1:ShipmentBillingOption>
+                                        <q1:Code>10</q1:Code>
+                                        <q1:Description>PREPAID</q1:Description>
+                                </q1:ShipmentBillingOption>
+                        </q1:PaymentInformation>
+                        <q1:Service>
+                                <q1:Code>308</q1:Code>
+                                <q1:Description>UPS Freight LTL</q1:Description>
+                        </q1:Service>
+                        <q1:HandlingUnitOne>
+                                <q1:Quantity>1</q1:Quantity>
+                                <q1:Type>
+                                        <q1:Code>PLT</q1:Code>
+                                        <q1:Description>PALLET</q1:Description>
+                                </q1:Type>
+                        </q1:HandlingUnitOne>
+                        <q1:Commodity>
+                                <q1:Description>item</q1:Description>
+                                <q1:Weight>
+                                        <q1:Value>' . $orderweight . '</q1:Value>
+                                        <q1:UnitOfMeasurement>
+                                                <q1:Code>LBS</q1:Code>
+                                                <q1:Description>Pounds</q1:Description>
+                                        </q1:UnitOfMeasurement>
+                                </q1:Weight>
+                                <q1:NumberOfPieces>1</q1:NumberOfPieces>
+                                <q1:PackagingType>
+                                        <q1:Code>PLT</q1:Code>
+                                </q1:PackagingType>
+                                <q1:FreightClass>60</q1:FreightClass>
+                        </q1:Commodity>
+                        <q1:ShipmentServiceOptions>
+                           <q1:DeliveryOptions>
+                             <q1:LiftGateRequiredIndicator></q1:LiftGateRequiredIndicator>
+                             <q1:ResidentialDeliveryIndicator></q1:ResidentialDeliveryIndicator>
+                           </q1:DeliveryOptions>
+                        </q1:ShipmentServiceOptions>
+               </q1:FreightRateRequest>
+        </soapenv:Body>
+</soapenv:Envelope>';
+
+
+
+$params = Array(
+        'http' => Array(
+                'method' => "POST",
+                'header' => $header,
+                'content' => $xmlRequest ));
+
+   //dpm($params);
+
+$ctx = stream_context_create($params);
+$fp = fopen($url, 'rb', false, $ctx);
+$response = stream_get_contents($fp);
+
+ //dpm('ctx');
+ //dpm($ctx);
+
+ //dpm('response');
+ //dpm($response);
+
+// replace colons
+$xml = str_replace(':', '_', $response);
+
+
+if (!$obj = SimpleXML_Load_String($xml)) die("Could not load XML");
+
+ preg_match_all("/MonetaryValue>(.*?)<\//",$xml, $results);
+ //dpm($results);
+ //dpm('amount: ' . $results['0']['0']);
+
+ $quote = strip_tags($results[1][0]);
+
+
+// If discounted price comes back as zero, default to the the full price.
+
+ if($quote == 0){
+   $amount = 0;
+ }else{
+   $amount = $quote*100;
+   }
+
+  return array(
+    'amount' => $amount,
+    'currency_code' => 'USD',
+    'data' => array(),
+  );
+}
+
+
+/**
+ * Shipping service callback: returns the chicagoland shipping service details form.
+ */
+function commerce_freight_service_details_form($pane_form, $pane_values, $checkout_pane, $order, $shipping_service) {
+  // put additional fields here
+  $form = array();
+  return $form;
+}
+
+/**
+ * Shipping service callback: validates the chicagoland shipping service details.
+ */
+function commerce_freight_service_details_form_validate($details_form, $details_values, $shipping_service, $order, $form_parents) {
+  // put additional logic here
+}
+
+/**
+ * Shipping service callback
+ */
+function commerce_freight_service_details_form_submit($details_form, $details_values, $line_item) {
+  // put additional logic here
+}
+
